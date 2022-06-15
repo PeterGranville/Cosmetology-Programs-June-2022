@@ -11,6 +11,50 @@ library(scales)
 library(ggplot2)
 library(stringr)
 library(data.table)
+
+#####################################################################
+### This document reproduces The Century Foundation's June 2022   ###
+### report on cosmetology programs, embedding the code used for   ###
+### all original analysis into the text of the report. It is      ###
+### intended for any user with proficiency in R to determine how  ###
+### we calculated the figures in our report.                      ###
+#####################################################################
+
+#####################################################################
+### This analysis relies on four data sources. Because the data   ###
+### files are too large to have been stored on the GitHub         ###
+### repository for this project, they must first be downloaded    ###
+### before this code will successfully run.                       ###
+#####################################################################
+
+#####################################################################
+### The first source is IPEDS, and all IPEDS .csv file names in   ###
+### this document indicate the specific data file downloaded from ###
+### the IPEDS online portal. The link is here:                    ### 
+### https://nces.ed.gov/ipeds/datacenter/DataFiles.aspx?gotoReportId=7&fromIpeds=true&
+#####################################################################
+
+#####################################################################
+### The next source is the College Scorecard. We use the full,    ###
+### most recent (as of June 2022) program-level and               ###
+### institution-level data sets, which can be downloaded here:    ###
+### https://collegescorecard.ed.gov/data/. 
+#####################################################################
+
+#####################################################################
+### The third file is the American Community Survey Public Use    ###
+### Microdata Sample. We use the 1-year PUMS sample reflecting    ###
+### calendar year 2019. The data files can be downloaded from     ###
+### this site in the "csv_pus.zip" file:                          ###
+### https://www2.census.gov/programs-surveys/acs/data/pums/2019/1-Year/
+#####################################################################
+
+#####################################################################
+### Finally, we  use the data on Gainful Employment released in   ###
+### March 2022 by the Department of Education. This is available  ###
+### at the following link: https://www.newamerica.org/documents/7232/GE_Information_Rates_Data_03-15-22_FINAL.xlsx
+#####################################################################
+
 ```
 
 ## Introduction 
@@ -158,7 +202,7 @@ rm("pusa", "pusb")
 pusm.HSG <- pusm %>% filter(SCHL %in% c(
   16, # Regular high school diploma
   17  # GED or alternative credential
-))
+)) %>% filter(AGEP %in% c(25, 26, 27, 28, 29, 30, 31, 32, 33, 34))
 
 ######################################################################
 ### We now derive the average earnings of high school graduates    ###
@@ -170,7 +214,7 @@ pusm.HSG$PWGTPshare <- pusm.HSG$PWGTP / sum(pusm.HSG$PWGTP, na.rm=TRUE)
 pusm.HSG$weighted.earnings <- pusm.HSG$PWGTPshare * pusm.HSG$WAGP
 
 HSG.earnings <- sum(pusm.HSG$weighted.earnings, na.rm=TRUE)
-paste("The average earnings of those with only a high school diploma is ", dollar(HSG.earnings, accuracy=1), ".", sep="")
+paste("The average earnings of those with only a high school diploma (aged 25-34) is ", dollar(HSG.earnings, accuracy=1), ".", sep="")
 ```
 
 In addition, cosmetology students graduate with an average of $10,200 in student loan debt.
