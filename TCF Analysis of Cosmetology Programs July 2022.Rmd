@@ -1,0 +1,1232 @@
+---
+title: "TCF Analysis of Cosmetology Programs"
+author: "Peter Granville"
+date: 'July 2022'
+output: pdf_document
+---
+
+```{r setup1, include=FALSE}
+library(dplyr)
+library(scales)
+library(ggplot2)
+library(stringr)
+library(data.table)
+
+#####################################################################
+### This document reproduces The Century Foundation's June 2022   ###
+### report on cosmetology programs, embedding the code used for   ###
+### all original analysis into the text of the report. It is      ###
+### intended for any user with proficiency in R to determine how  ###
+### we calculated the figures in our report.                      ###
+#####################################################################
+
+#####################################################################
+### This analysis relies on four data sources. Because the data   ###
+### files are too large to have been stored on the GitHub         ###
+### repository for this project, they must first be downloaded    ###
+### before this code will successfully run.                       ###
+#####################################################################
+
+#####################################################################
+### The first source is IPEDS, and all IPEDS .csv file names in   ###
+### this document indicate the specific data file downloaded from ###
+### the IPEDS online portal. The link is here:                    ### 
+### https://nces.ed.gov/ipeds/datacenter/DataFiles.aspx?gotoReportId=7&fromIpeds=true&
+#####################################################################
+
+#####################################################################
+### The next source is the College Scorecard. We use the full,    ###
+### most recent (as of June 2022) program-level and               ###
+### institution-level data sets, which can be downloaded here:    ###
+### https://collegescorecard.ed.gov/data/. 
+#####################################################################
+
+#####################################################################
+### The third source is the American Community Survey Public Use  ###
+### Microdata Sample. We use the 1-year PUMS sample reflecting    ###
+### calendar year 2019. The data files can be downloaded from     ###
+### this site in the "csv_pus.zip" file:                          ###
+### https://www2.census.gov/programs-surveys/acs/data/pums/2019/1-Year/
+#####################################################################
+
+#####################################################################
+### Finally, we  use the data on Gainful Employment released in   ###
+### March 2022 by the Department of Education. This is available  ###
+### at the following link: https://www.newamerica.org/documents/7232/GE_Information_Rates_Data_03-15-22_FINAL.xlsx
+#####################################################################
+
+```
+
+```{r setup2, include=FALSE}
+
+#######################################################################
+### Before performing later analyses, we must first define what is  ###
+### a cosmetology school: for this report, we define it as one      ###
+### where half of all programs in 2018-19 are in cosmetology. We    ###
+### rely here on IPEDS data on annual award completions. We use     ###
+### 2018-19 instead of 2019-20 to avoid any irregularities caused   ###
+### by COVID-19.                                                    ###
+#######################################################################
+
+c2019 <- fread("c2019_a_rv.csv", header=TRUE, select=c(
+  "UNITID",   # Unique identification number of the institution
+  "CIPCODE",  # CIP Code -  2010 Classification
+  "AWLEVEL",  # Award Level code
+  "MAJORNUM", # First or Second Major
+  "CTOTALT"   # Grand total 
+)) %>% filter(MAJORNUM==1) %>% filter(CTOTALT > 0) # This prevents over-counting of programs.
+
+#######################################################################
+### Now we count the number of programs that are in cosmetology.    ###
+### First we define which CIP codes are in cosmetology. 
+#######################################################################
+
+cosmetologyCIPs <- c(
+  "12.0401",  # Cosmetology/Cosmetologist, General
+  "12.0402",  # Barbering/Barber
+  "12.0404",  # Electrolysis/Electrology and Electrolysis Technician
+  "12.0406",  # Make-Up Artist/Specialist
+  "12.0407",  # Hair Styling/Stylist and Hair Design
+  "12.0408",  # Facial Treatment Specialist/Facialist
+  "12.0409",  # Aesthetician/Esthetician and Skin Care Specialist
+  "12.0410",  # Nail Technician/Specialist and Manicurist
+  "12.041",   # Nail Technician/Specialist and Manicurist
+  "12.0412",  # Salon/Beauty Salon Management/Manager
+  "12.0413",  # Cosmetology, Barber/Styling, and Nail Instructor
+  "12.0414",  # Master Aesthetician/Esthetician
+  "12.0499")  # Cosmetology and Related Personal Grooming Arts, Other
+
+c2019$Cosmetology <- ifelse(c2019$CIPCODE %in% cosmetologyCIPs, 1, 0)
+c2019$Counter <- rep(1, nrow(c2019))
+
+#######################################################################
+### And finally we label those where half or more of programs are   ###
+### cosmetology.                                                    ###
+#######################################################################
+
+agg2 <- aggregate(data=c2019, cbind(Cosmetology, Counter) ~ UNITID, FUN=sum)
+agg2$`Cosmetology share` <- agg2$Cosmetology / agg2$Counter
+agg3 <- agg2 %>% filter(`Cosmetology share` >= 0.5)
+cosmetologySchools <- unique(agg3$UNITID)
+```
+
+## Introduction 
+
+This spring, the U.S. Department of Education announced that it was discharging the federal student loans of 28,000 students who attended Marinello Beauty School. In taking such action, the department was following a rule that allows it to discharge any federal loans taken out by students who were deceived by their school.  The department found that the school misled students about the quality and content of programs; exploited students’ unpaid labor; failed to train students in key skills, such as how to cut hair; and left students without the skills to pass certification exams, find employment, and repay their loans.  
+	
+Unfortunately, the case of Marinello Beauty School is not an isolated incident. For-profit cosmetology schools like Marinello have faced multiple actions from regulators  as well as consumer class actions alleging deceptive practices, exploitation of unpaid labor, and other misconduct.  Unfortunately, the risks to cosmetology students extend beyond such illegal conduct. Students attending such programs typically borrow thousands of dollars through student loans and invest months of their time in training ... 
+
+```{r stat1, include=TRUE, echo=FALSE, warning=FALSE}
+#####################################################################
+### First we load the data from the institutional characteristics ###
+### survey in IPEDS. The variables we use refer to the            ###
+### institution's largest program.                                ###
+#####################################################################
+
+ic2020 <- read.csv("ic2020_py.csv", header=TRUE, row.names = NULL) %>% select(
+  UNITID,   # Unique identification number of the institution
+  CIPCODE1, # CIP code of largest program
+  CIPCODE2, # CIP code of 2nd largest program
+  CIPCODE3, # CIP code of 3rd largest program
+  MTHCMP1,  # Number of months to complete largest program
+  MTHCMP2,  # Number of months to complete 2nd largest program
+  MTHCMP3   # Number of months to complete 3rd largest program
+) 
+ic2020$MTHCMP1 <- as.numeric(ic2020$MTHCMP1)
+ic2020$MTHCMP2 <- as.numeric(ic2020$MTHCMP2)
+ic2020$MTHCMP3 <- as.numeric(ic2020$MTHCMP3)
+
+#####################################################################
+### Now we calculate the average length of time needed for a      ###
+### full-time student to complete a cosmetology program.          ###
+#####################################################################
+
+ic1 <- ic2020 %>% filter(CIPCODE1 %in% cosmetologyCIPs)
+ic2 <- ic2020 %>% filter(CIPCODE2 %in% cosmetologyCIPs)
+ic3 <- ic2020 %>% filter(CIPCODE3 %in% cosmetologyCIPs)
+
+ic1$ProgramLength <- ic1$MTHCMP1
+ic2$ProgramLength <- ic2$MTHCMP2
+ic3$ProgramLength <- ic3$MTHCMP3
+
+ic1 <- ic1 %>% select(UNITID, ProgramLength) 
+ic2 <- ic2 %>% select(UNITID, ProgramLength) 
+ic3 <- ic3 %>% select(UNITID, ProgramLength) 
+
+ic0 <- rbind(ic1, ic2, ic3)
+
+average.months <- mean(ic0$ProgramLength, na.rm=TRUE)
+paste("The average amount of full-time enrollment to complete a cosmetology program is ", round(average.months, 1), " months.", sep="")
+```
+
+... only to receive near-poverty-level earnings after graduation. Three years after completing their program, the average cosmetologist earns only $16,600 a year ... 
+
+```{r stat2A, include=TRUE, echo=FALSE, warning=FALSE}
+
+#####################################################################
+### Here we use the program-level College Scorecard dataset. We   ###
+### filter for cosmetology programs and calculate the average     ###
+### earnings of graduates.                                        ###
+#####################################################################
+
+CSP1 <- fread("Most-Recent-Cohorts-Field-of-Study.csv", header=TRUE, select=c(
+  "UNITID",                  # Unit ID for institution
+  "INSTNM",                  # Institution name
+  "CIPCODE",                 # Classification of Instructional Programs (CIP) code for the field of study
+  "EARN_COUNT_NE_3YR",       # Number of graduates not enrolled 3 years after completing highest credential
+  "EARN_NE_MDN_3YR"          # Median earnings of graduates not enrolled 3 years after completing highest credential
+)) %>% filter(CIPCODE == 1204)
+
+CSP1$EARN_NE_MDN_3YR <- as.numeric(CSP1$EARN_NE_MDN_3YR)
+CSP1$EARN_COUNT_NE_3YR <- as.numeric(CSP1$EARN_COUNT_NE_3YR)
+
+CSP1 <- CSP1 %>% filter((is.na(EARN_NE_MDN_3YR)==FALSE) & (is.na(EARN_COUNT_NE_3YR)==FALSE))
+
+#####################################################################
+### We take the median values by program and weight them by the   ###
+### program's share of cosmetology program graduates in the       ###
+### cohort.                                                       ###
+#####################################################################
+
+CSP1$Share.of.cosmetology.grads <- CSP1$EARN_COUNT_NE_3YR / sum(CSP1$EARN_COUNT_NE_3YR, na.rm=TRUE)
+
+CSP1$weighted.earnings <- CSP1$EARN_NE_MDN_3YR * CSP1$Share.of.cosmetology.grads
+
+weighted.median.earnings <- sum(CSP1$weighted.earnings, na.rm=TRUE)
+paste("Average earnings among cosmetology program graduates is ", dollar(weighted.median.earnings, accuracy=1), " 3 years post-completion.", sep="")
+```
+
+... which is $8,600 below the average earnings of workers with only a high school diploma ... 
+
+```{r stat2B, include=TRUE, echo=FALSE, warning=FALSE}
+
+######################################################################
+### This American Community Survey dataset reflects calendar year  ###
+### 2019. We load in the weight variable and selected employment   ###
+### and education variables. We filter for those who were in the   ###
+### workforce at the time of interview.                            ###
+######################################################################
+
+######################################################################
+### These datasets are too large to be published to the GitHub     ###
+### repository. They can be accessed at the following site:        ###
+### https://www2.census.gov/programs-surveys/acs/data/pums/2019/1-Year/
+######################################################################
+
+pumsVariables <- c(
+  "SERIALNO", # Housing unit/GQ person serial number
+  "ST",       # State 
+  "PWGTP",    # Person weight
+  "ADJINC",   # Adjustment factor for income and earnings dollar amounts (6 implied decimal places)
+  "AGEP",     # Age
+  "WAGP",     # Wages or salary income past 12 months
+  "WKHP",     # Usual hours worked per week past 12 months
+  "OCCP",     # Occupation recode
+  "SCHL",     # Educational attainment
+  "ESR")      # Employment status recode
+
+pusa.18 <- fread("psam_pusa_2018.csv", header=TRUE, select=pumsVariables) %>% filter(ESR %in% c(1, 2, 3, 4, 5))
+pusb.18 <- fread("psam_pusb_2018.csv", header=TRUE, select=pumsVariables) %>% filter(ESR %in% c(1, 2, 3, 4, 5))
+pusa.19 <- fread("psam_pusa_2019.csv", header=TRUE, select=pumsVariables) %>% filter(ESR %in% c(1, 2, 3, 4, 5))
+pusb.19 <- fread("psam_pusb_2019.csv", header=TRUE, select=pumsVariables) %>% filter(ESR %in% c(1, 2, 3, 4, 5))
+
+pusm <- rbind(pusa.18, pusb.18, pusa.19, pusb.19) 
+rm("pusa.18", "pusb.18", "pusa.19", "pusb.19")
+
+######################################################################
+### Now we filter for all those who have a high school diploma or  ###
+### a GED and no higher educational attainment, and who are aged   ###
+### 25-34, which is the population used for the Education          ###
+### Department's  earnings threshold measure.                      ###
+######################################################################
+
+pusm.HSG <- pusm %>% filter(SCHL %in% c(
+  16, # Regular high school diploma
+  17  # GED or alternative credential
+)) %>% filter(AGEP %in% c(25, 26, 27, 28, 29, 30, 31, 32, 33, 34))
+
+######################################################################
+### Now we reduce the weights' size to make calculations faster.   ###
+### This does not have a great effect on the median income value.  ###
+######################################################################
+
+pusm.HSG$PWGTP.modified <- pusm.HSG$PWGTP / 10
+
+######################################################################
+### We way we calculate median earnings is as follows: we put into ###
+### a dataframe each subject's income, repeated for a number of    ###
+### times that corresponds to the subject's population weight. We  ###
+### then derive the median from that list.                         ###
+######################################################################
+
+pusm.HSG$Index <- c(1:nrow(pusm.HSG))
+earnings.dataset <- data.frame("Index" = c(NA))
+
+for(i in 1:nrow(pusm.HSG)){
+  new.dataset <- data.frame("Index" = rep(i, round(pusm.HSG$PWGTP.modified[i], 0)))
+  earnings.dataset <- rbind(earnings.dataset, new.dataset)
+  i <- i + 1
+}
+
+pusm.HSG.thin <- pusm.HSG %>% select(Index, WAGP)
+earnings.dataset <- left_join(x=earnings.dataset, y=pusm.HSG.thin, by="Index")
+HSG.earnings <- median(earnings.dataset$WAGP, na.rm=TRUE)
+
+paste("The average earnings of those with only a high school diploma (aged 25-34) is ", dollar(HSG.earnings, accuracy=1), ".", sep="")
+```
+
+... and only $3,000 above the single-person poverty guideline.  In addition, cosmetology students graduate with an average of $10,200 in student loan debt. 
+
+```{r stat3, include=TRUE, echo=FALSE, warning=FALSE}
+
+#####################################################################
+### Similarly as in the estimate of average earnings by program,  ###
+### we take the average debt values by program and weight them by ###
+### the program's share of cosmetology program graduates in the   ###
+### cohort.                                                       ###
+#####################################################################
+
+CSP2 <- fread("Most-Recent-Cohorts-Field-of-Study.csv", header=TRUE, select=c(
+  "UNITID",                  # Unit ID for institution
+  "INSTNM",                  # Institution name
+  "CIPCODE",                 # Classification of Instructional Programs (CIP) code for the field of study
+  "DEBT_ALL_STGP_EVAL_MEAN", # Average Stafford and Grad PLUS loan debt disbursed at this institution
+  "DEBT_ALL_STGP_EVAL_N",    # Borrower count for average/median Stafford and Grad PLUS loan debt disbursed at this institution
+  "DEBT_ALL_PP_EVAL_MEAN",   # Average Parent PLUS loan debt disbursed at this institution
+  "DEBT_ALL_PP_EVAL_N"       # Student recipient count for average/median Parent PLUS loan debt disbursed at this institution
+)) %>% filter(CIPCODE == 1204) 
+
+CSP2$DEBT_ALL_STGP_EVAL_MEAN <- as.numeric(CSP2$DEBT_ALL_STGP_EVAL_MEAN)
+CSP2$DEBT_ALL_PP_EVAL_MEAN <- as.numeric(CSP2$DEBT_ALL_PP_EVAL_MEAN)
+CSP2$DEBT_ALL_STGP_EVAL_N <- as.numeric(CSP2$DEBT_ALL_STGP_EVAL_N)
+CSP2$DEBT_ALL_PP_EVAL_N <- as.numeric(CSP2$DEBT_ALL_PP_EVAL_N)
+CSP2 <- CSP2 %>% filter(is.na(DEBT_ALL_STGP_EVAL_N)==FALSE) %>% filter(is.na(DEBT_ALL_STGP_EVAL_MEAN)==FALSE)
+
+CSP2$Share.of.STGP.recipients <- CSP2$DEBT_ALL_STGP_EVAL_N / sum(CSP2$DEBT_ALL_STGP_EVAL_N, na.rm=TRUE)
+CSP2$Share.of.PP.recipients <- CSP2$DEBT_ALL_PP_EVAL_N / sum(CSP2$DEBT_ALL_PP_EVAL_N, na.rm=TRUE)
+
+CSP2$weighted.STGP.debt <- CSP2$DEBT_ALL_STGP_EVAL_MEAN * CSP2$Share.of.STGP.recipients
+CSP2$weighted.PP.debt <- CSP2$DEBT_ALL_PP_EVAL_MEAN * CSP2$Share.of.PP.recipients
+
+weighted.average.STGP <- sum(CSP2$weighted.STGP.debt, na.rm=TRUE)
+weighted.average.PP <- sum(CSP2$weighted.PP.debt, na.rm=TRUE)
+
+paste("The average Stafford and Grad PLUS amount among cosmetology program graduates is ", dollar(weighted.average.STGP, accuracy=1), ".", sep="")
+paste("The average Parent PLUS amount among cosmetology program graduates is ", dollar(weighted.average.PP, accuracy=1), ".", sep="")
+```
+
+The number of cosmetology students at financial risk after attending these schools is large. Cosmetology schools enrolled close to 200,000 students in 2018–19. 
+
+```{r stat3.5, include=TRUE, echo=FALSE, warning=FALSE}
+
+#######################################################################
+### Headcount enrollment data come from IPEDS. We use the           ###
+### cosmetologySchools list we had defined earlier.                 ###
+#######################################################################
+
+effy2019 <- fread("effy2019_rv.csv", header=TRUE, select=c(
+  "UNITID",   # Unique identification number of the institution
+  "EFFYLEV", # Level and degree/certificate-seeking status of student
+  "EFYTOTLT"  # Grand total
+)) %>% filter(EFFYLEV==1) # All students total
+
+effy.cos <- effy2019 %>% filter(UNITID %in% cosmetologySchools)
+total.students <- sum(effy.cos$EFYTOTLT, na.rm=TRUE)
+
+paste("The number of students enrolled in cosmetology schools in 2018-19 was ", comma(total.students), ".", sep="")
+```
+
+The programs train hairdressers, makeup artists, and manicurists. Three-quarters of cosmetology programs are offered by for-profit schools.
+
+```{r stat4, include=TRUE, echo=FALSE, warning=FALSE}
+
+#######################################################################
+### We are interested here in the breakdown of cosmetology programs ###
+### by sector. We use completion data to gather a list of           ###
+### cosmetology programs. We then link this to institutional        ###
+### control data and aggregate at the program level.                ###
+#######################################################################
+
+c2019 <- fread("c2019_a_rv.csv", header=TRUE, select=c(
+  "UNITID",   # Unique identification number of the institution
+  "CIPCODE",  # CIP Code -  2010 Classification
+  "MAJORNUM", # First or Second Major
+  "CTOTALT"   # Grand total
+)) %>% filter(MAJORNUM==1) %>% filter(CIPCODE %in% cosmetologyCIPs) %>% filter(CTOTALT > 0)
+
+hd2020 <- fread("hd2020.csv", header=TRUE, select=c(
+  "UNITID",   # Unique identification number of the institution
+  "CONTROL"   # Control of institution
+))
+c2019 <- right_join(x=hd2020, y=c2019, by="UNITID")
+c2019$count <- rep(1, nrow(c2019))
+agg1 <- aggregate(data=c2019, count ~ CONTROL, FUN=sum)
+
+for.profit.share <- agg1$count[agg1$CONTROL==3] / sum(agg1$count)
+paste("The share of cosmetology programs that are at for-profit colleges is ", percent(for.profit.share, accuracy=1), ".", sep="")
+```
+
+Over 1,000 cosmetology schools are funded through federal student loans and grants.
+
+```{r stat5.1, include=TRUE, echo=FALSE, warning=FALSE}
+
+#######################################################################
+### Information about colleges' participation in the Title IV       ###
+### financial aid programs is reported by IPEDS.                    ###
+#######################################################################
+
+hd.cos <- fread("hd2020.csv", header=TRUE, select=c(
+  "UNITID", 
+  "OPEFLAG"
+)) %>% filter(UNITID %in% cosmetologySchools)
+
+hd.cos$t4eligible <- ifelse(hd.cos$OPEFLAG %in% c(1, 2, 8), 1, 0)
+
+paste("The number of cosmetology schools that participate in Title IV is ", comma(sum(hd.cos$t4eligible)), ".", sep="")
+```
+
+Cosmetology schools received more than $1 billion in federal loans and grants in 2019–20.
+
+```{r stat5.2, include=TRUE, echo=FALSE, warning=FALSE}
+
+#######################################################################
+### Using IPEDS, we derive cosmetology schools' total               ###
+### federal grants and loans in 2019-20.                            ###
+#######################################################################
+
+sfa1920 <- fread("sfa1920.csv", header=TRUE, select=c(
+  "UNITID", 
+  "UFLOANT", 
+  "UPGRNTT"
+))
+hd2020 <- fread("hd2020.csv", header=TRUE, select=c(
+  "UNITID", 
+  "CONTROL"
+))
+total.aid <- sum(sfa1920$UFLOANT[sfa1920$UNITID %in% cosmetologySchools], na.rm=TRUE) + sum(sfa1920$UPGRNTT[sfa1920$UNITID %in% cosmetologySchools], na.rm=TRUE)
+
+paste("Total federal student aid received by cosmetology schools in 2019-20 was ", dollar(total.aid, accuracy=1000000), ".", sep="") # Rounded to the nearest million.
+```
+
+Unfortunately, the federal loans and grants invested in these institutions have not translated into adequate earnings for program graduates. 
+
+Women and people of color make up a disproportionate share of cosmetology graduates. Ninety percent of cosmetology program graduates are women. 
+
+```{r stat6, include=TRUE, echo=FALSE, warning=FALSE}
+
+#######################################################################
+### For this and the next set of stats, we use a set of completions ###
+### data, as this is the best source of information on demographics ### 
+### by program.                                                     ###
+#######################################################################
+
+c2019 <- fread("c2019_a_rv.csv", header=TRUE, select=c(
+  "UNITID",   # Unique identification number of the institution
+  "CIPCODE",  # CIP Code -  2010 Classification
+  "AWLEVEL",  # Award Level code
+  "MAJORNUM", # First or Second Major
+  "CTOTALT",  # Grand total 
+  "CTOTALW",  # Grand total women
+  "CBKAAT",   # Black or African American total
+  "CHISPT"    # Hispanic or Latino total
+)) %>% filter(MAJORNUM==1) %>% filter(CTOTALT > 0)
+
+cosmoGrads <- c2019 %>% filter(CIPCODE %in% cosmetologyCIPs)
+female.share <- sum(cosmoGrads$CTOTALW, na.rm=TRUE) / sum(cosmoGrads$CTOTALT, na.rm=TRUE)
+paste("The share of cosmetology credential earners who are women is ", percent(female.share), ".", sep="")
+```
+
+Black and Latino/a students also make up an outsized share of cosmetology graduates: Black students receive 19 percent of cosmetology certifications but comprise 13 percent of the postsecondary student population,  and Latino/a students receive 25 percent of cosmetology certifications but comprise 19 percent of the student population. 
+
+```{r stat7, include=TRUE, echo=FALSE, warning=FALSE}
+
+#######################################################################
+### First we find the shares of Black and Latino/a cosmetology      ###
+### credential earners.                                             ###
+#######################################################################
+
+Black.share.1 <- sum(cosmoGrads$CBKAAT, na.rm=TRUE) / sum(cosmoGrads$CTOTALT, na.rm=TRUE)
+Latino.share.1 <- sum(cosmoGrads$CHISPT, na.rm=TRUE) / sum(cosmoGrads$CTOTALT, na.rm=TRUE)
+paste(percent(Black.share.1, accuracy=0.1), " of cosmetology credential earners are Black. ", percent(Latino.share.1, accuracy=0.1), " are Latino or Hispanic.", sep="")
+
+#######################################################################
+### Next we do the same for all postsecondary enrollment.           ###
+#######################################################################
+
+effy2019 <- fread("effy2019_rv.csv", header=TRUE, select=c(
+  "UNITID",   # Unique identification number of the institution
+  "EFFYLEV",  # Level of student
+  "EFYTOTLT", # Grand total
+  "EFYBKAAT", # Black or African American total
+  "EFYHISPT"  # Hispanic or Latino total
+)) %>% filter(EFFYLEV==1)
+
+Black.share.2 <- sum(effy2019$EFYBKAAT, na.rm=TRUE) / sum(effy2019$EFYTOTLT, na.rm=TRUE)
+Latino.share.2 <- sum(effy2019$EFYHISPT, na.rm=TRUE) / sum(effy2019$EFYTOTLT, na.rm=TRUE)
+paste(percent(Black.share.2, accuracy=0.1), " of all postsecondary students are Black. ", percent(Latino.share.2, accuracy=0.1), " are Latino or Hispanic.", sep="")
+```
+
+Most cosmetology students also tend to be low-income when they enroll: 54 percent of students who attend cosmetology schools  receive federal Pell Grants, which are awarded to students with high levels of financial need, compared with just 34 percent of all undergraduates. 
+
+```{r stat8, include=TRUE, echo=FALSE, warning=FALSE}
+
+########################################################################
+### Here we rely on the list of cosmetology schools derived earlier. ###
+### First we find the share of undergraduates at cosmetology schools ###
+### who receive Pell.                                                ###
+########################################################################
+
+sfa1 <- fread("sfa1920.csv", header=TRUE, select=c(
+  "UNITID", 
+  "UPGRNTN", # Number of undergraduate students awarded Pell grants
+  "SCUGRAD"    # Total number of undergraduates - financial aid cohort
+)) %>% filter(UNITID %in% cosmetologySchools)
+sfa1$UPGRNTN <- as.numeric(sfa1$UPGRNTN)
+sfa1$SCUGRAD <- as.numeric(sfa1$SCUGRAD)
+pell.at.cosmetology.schools <- sum(sfa1$UPGRNTN, na.rm=TRUE) / sum(sfa1$SCUGRAD, na.rm=TRUE)
+
+########################################################################
+### Now we do the same again, without applying the filter for        ###
+### cosmetology schools.                                             ###
+########################################################################
+
+sfa2 <- fread("sfa1920.csv", header=TRUE, select=c(
+  "UNITID", 
+  "UPGRNTN", # Number of undergraduate students awarded Pell grants
+  "SCUGRAD"    # Total number of undergraduates - financial aid cohort
+)) 
+sfa2$UPGRNTN <- as.numeric(sfa2$UPGRNTN)
+sfa2$SCUGRAD <- as.numeric(sfa2$SCUGRAD)
+pell.at.all.schools <- sum(sfa2$UPGRNTN, na.rm=TRUE) / sum(sfa2$SCUGRAD, na.rm=TRUE)
+
+paste("The share of cosmetology school undergraduates receiving Pell is ", percent(pell.at.cosmetology.schools, accuracy=0.1), ".", sep="")
+paste("The share of all undergraduates receiving Pell is ", percent(pell.at.all.schools, accuracy=0.1), ".", sep="")
+```
+
+This year, the Department of Education announced a plan to propose a new federal rule that will impose minimum outcome standards on cosmetology and other career-focused postsecondary programs that receive federal funding. The rule, known as the “gainful employment” rule, will tie programs’ eligibility for federal Title IV funding to measures of graduates’ debt in relation to their earnings, and to measures of graduates’ earnings in comparison to workers with only a high school diploma. If proposed as discussed in this spring’s negotiated rulemaking discussions, the earnings threshold will set an extremely low bar: programs will fail only if graduates earn, on average, less than the average working high school graduate (aged 25 to 34) earns in their state.  The idea behind the earnings threshold is that programs that do not raise graduates’ earnings above the level of high school graduates do not provide a significant benefit to students and do not merit investment of Title IV federal financial aid, which is intended to fund degree-granting and high-value, career-focused certificate programs. The proposed gainful employment rule’s earnings threshold will ensure that cosmetology programs that leave students with near-poverty-level wages do not remain eligible for Title IV funding. 
+
+The rule would spur a much-needed revamp of the cosmetology training industry. If implemented today, nearly all cosmetology programs subject to the rule (98 percent) would fail to meet the very low benchmark, because program graduates earn less, on average, than workers with only a high school diploma. In addition, more than one-quarter (28 percent) of programs leave students with too much debt to meet the rule’s debt-to-earnings benchmark.  (See Table 1 below.) 
+
+```{r table1, include=TRUE, echo=FALSE, warning=FALSE}
+
+#######################################################################
+### First we load in the Education Department's dataset, published  ###
+### in March 2022. Then we mark which programs are cosmetology      ###
+### programs and which are subject to each test.                    ###
+#######################################################################
+
+GE <- read.csv("GE_Information_Rates_Data_03-15-22_FINAL.csv", header=TRUE)
+GE$count <- rep(1, nrow(GE))
+GE$failsDTE <- ifelse(GE$pfDTE=="Fail - based on GE Data", 1, 0)
+GE$failsET <- ifelse(GE$pfET=="Fail - based on GE Data", 1, 0)
+GE$totalFails <- GE$failsDTE + GE$failsET
+
+GEP <- GE %>% filter(geprogram==1)
+GEP$`Number of tests subject to` <- GEP$inDTE + GEP$inET
+
+GEP.DTE <- GE %>% filter(inDTE==1)
+GEP.ET <- GE %>% filter(inET==1)
+
+GEP.cos <- GEP %>% filter(cipcode==1204)
+GEP.cos.DTE <- GEP.cos %>% filter(inDTE==1)
+GEP.cos.ET <- GEP.cos %>% filter(inET==1)
+GEP.cos.BOTH <- GEP.cos %>% filter(`Number of tests subject to`==2)
+
+#######################################################################
+### First we establish the table with the for-profit row added.     ###
+#######################################################################
+
+table1 <- data.frame("Control"=c("For-profit"), 
+                     "Programs subject to both tests"=c(sum(GEP.cos.BOTH$count[GEP.cos.BOTH$control=="Private, for-profit"])), 
+                     "Programs that fail DTE test"=c(sum(GEP.cos.BOTH$count[(GEP.cos.BOTH$control=="Private, for-profit") & (GEP.cos.BOTH$failsDTE==1)])), 
+                     "Programs that fail ET test"=c(sum(GEP.cos.BOTH$count[(GEP.cos.BOTH$control=="Private, for-profit") & (GEP.cos.BOTH$failsET==1)])), 
+                     "Programs that fail at least one test"=c(sum(GEP.cos.BOTH$count[(GEP.cos.BOTH$control=="Private, for-profit") & (GEP.cos.BOTH$totalFails >= 1)])), 
+                     "Programs that fail both tests"=c(sum(GEP.cos.BOTH$count[(GEP.cos.BOTH$control=="Private, for-profit") & (GEP.cos.BOTH$totalFails == 2)])))
+
+#######################################################################
+### Next we add the row for nonprofits.                             ###
+#######################################################################
+
+table1 <- table1 %>% add_row(Control="Nonprofit", 
+                     Programs.subject.to.both.tests=sum(GEP.cos.BOTH$count[GEP.cos.BOTH$control=="Private, nonprofit"]), 
+                     Programs.that.fail.DTE.test=sum(GEP.cos.BOTH$count[(GEP.cos.BOTH$control=="Private, nonprofit") & (GEP.cos.BOTH$failsDTE==1)]), 
+                     Programs.that.fail.ET.test=sum(GEP.cos.BOTH$count[(GEP.cos.BOTH$control=="Private, nonprofit") & (GEP.cos.BOTH$failsET==1)]), 
+                     Programs.that.fail.at.least.one.test=sum(GEP.cos.BOTH$count[(GEP.cos.BOTH$control=="Private, nonprofit") & (GEP.cos.BOTH$totalFails >= 1)]), 
+                     Programs.that.fail.both.tests=sum(GEP.cos.BOTH$count[(GEP.cos.BOTH$control=="Private, nonprofit") & (GEP.cos.BOTH$totalFails == 2)]))
+
+#######################################################################
+### Now we add a row for publics.                                   ###
+#######################################################################
+
+table1 <- table1 %>% add_row(Control="Public", 
+                     Programs.subject.to.both.tests=sum(GEP.cos.BOTH$count[GEP.cos.BOTH$control=="Public"]), 
+                     Programs.that.fail.DTE.test=sum(GEP.cos.BOTH$count[(GEP.cos.BOTH$control=="Public") & (GEP.cos.BOTH$failsDTE==1)]), 
+                     Programs.that.fail.ET.test=sum(GEP.cos.BOTH$count[(GEP.cos.BOTH$control=="Public") & (GEP.cos.BOTH$failsET==1)]), 
+                     Programs.that.fail.at.least.one.test=sum(GEP.cos.BOTH$count[(GEP.cos.BOTH$control=="Public") & (GEP.cos.BOTH$totalFails >= 1)]), 
+                     Programs.that.fail.both.tests=sum(GEP.cos.BOTH$count[(GEP.cos.BOTH$control=="Public") & (GEP.cos.BOTH$totalFails == 2)]))
+
+#######################################################################
+### Lastly we add a row for all institutions regardless of control. ###
+#######################################################################
+
+table1 <- table1 %>% add_row(Control="Total", 
+                     Programs.subject.to.both.tests=sum(GEP.cos.BOTH$count), 
+                     Programs.that.fail.DTE.test=sum(GEP.cos.BOTH$count[GEP.cos.BOTH$failsDTE==1]), 
+                     Programs.that.fail.ET.test=sum(GEP.cos.BOTH$count[GEP.cos.BOTH$failsET==1]), 
+                     Programs.that.fail.at.least.one.test=sum(GEP.cos.BOTH$count[GEP.cos.BOTH$totalFails >= 1]), 
+                     Programs.that.fail.both.tests=sum(GEP.cos.BOTH$count[GEP.cos.BOTH$totalFails == 2]))
+
+#######################################################################
+### Now we add in percentages to show the share of programs that    ###
+### fall into each category.                                        ###
+#######################################################################
+
+table1$Programs.that.fail.DTE.test <- paste(table1$Programs.that.fail.DTE.test, " (", percent(table1$Programs.that.fail.DTE.test / table1$Programs.subject.to.both.tests, accuracy=1), ")", sep="")
+
+table1$Programs.that.fail.ET.test <- paste(table1$Programs.that.fail.ET.test, " (", percent(table1$Programs.that.fail.ET.test / table1$Programs.subject.to.both.tests, accuracy=1), ")", sep="")
+
+table1$Programs.that.fail.at.least.one.test <- paste(table1$Programs.that.fail.at.least.one.test, " (", percent(table1$Programs.that.fail.at.least.one.test / table1$Programs.subject.to.both.tests, accuracy=1), ")", sep="")
+
+table1$Programs.that.fail.both.tests <- paste(table1$Programs.that.fail.both.tests, " (", percent(table1$Programs.that.fail.both.tests / table1$Programs.subject.to.both.tests, accuracy=1), ")", sep="")
+
+#######################################################################
+### Finally we adjust the column names and print the table.         ###
+#######################################################################
+
+names(table1) <- c("Control", "Programs subject to both tests", "Programs that fail DTE test", "Programs that fail ET test", "Programs that fail at least one test", "Programs that fail both tests")
+table1
+```
+
+Programs that fail either of the rule’s metrics for more than two out of three years will lose eligibility for federal Title IV student aid funding for a period of three years. To avoid those consequences, some schools will change their program offerings to fields that provide adequate earnings, or seek other sources of funds for cosmetology programs that may better fit low-wage training. 
+
+## Why are cosmetology programs such a bad deal for students?
+
+Cosmetology is a notoriously low-paying field of employment, but cosmetology programs require substantial investment by students, in terms not only of money but also time.
+
+### State licensure requirements contribute to the high cost of cosmetology programs
+
+State licensure requirements are a primary driver of the high cost of cosmetology programs. All fifty states and Washington, D.C. require cosmetologists to obtain licensure, and all impose a minimum number of training hours as a requirement for licensure.  The licensure requirements are imposed, at least in part, to address public health and safety concerns associated with provision of cosmetology services. Longer training hour requirements benefit  cosmetology schools, since schools can charge higher tuition for longer programs. The regulatory hurdles that state licensure requirements create also make it harder for new competitors to enter the cosmetology field, benefiting cosmetologists. Lobbying groups representing these interests play a role in driving up licensing requirements by pressuring state lawmakers to raise entry requirements.  
+
+State training hour requirements for cosmetologists vary widely, from 1,000-hour requirements in Massachusetts and New York, to more than double that number in Iowa, Oregon, and South Dakota. In many cases, the minimum training hour requirements exceed training hour requirements for professions that may pose greater public health and safety risks than cosmetology. For example, cosmetologists must complete, on average, eleven times as much training as the average emergency medical technician (EMT).  This suggests that cosmetologists’ minimum training hour requirements may be unnecessarily inflated. 
+
+The evidence indicates that the state requirements are causing excessively lengthy training: a report by the Institute for Justice found that more than 95 percent of cosmetology programs’ lengths exactly matched the number of hours of education required for licensure in cosmetology in the schools’ state.  In addition, when states lower training hour requirements, cosmetology schools generally shorten their program lengths to reflect the reduced requirements.  
+
+Unsurprisingly, longer training hour requirements result in higher costs and higher student loan debt for cosmetology students.  Reducing training requirements would enable schools to offer shorter, more affordable programs, reducing cosmetology students’ costs and debt burdens. 
+
+While the Department of Education does not directly control states’ licensing requirements, the department has a plan to use Title IV eligibility requirements to indirectly influence state licensing requirements. The department is expected to propose a rule that would create an incentive for states to reduce hour requirements by limiting Title IV eligibility based on the length of programs.  The proposed rule provides that, where the majority of states have licensure requirements for an occupation, Title IV funding eligibility will be limited to the portion of the program that does not exceed the national median of the minimum number of training hours required for licensure. For cosmetology, the national median number of hours required for licensure is 1,500.  In states with requirements above the median, students would not be eligible for Title IV funding after completing 1,500 training hours. 
+
+The proposed rule would create a significant incentive for cosmetology schools to lobby for decreases in state licensing hour requirements in states where the minimum hours required for licensure exceeds the national median.  Such efforts could lead state lawmakers to reduce state licensure requirements, resulting in lower-cost programs and reductions in student debt loads for cosmetology programs in those states.  
+
+### Cosmetology schools benefit from students’ unpaid labor
+
+In addition to revenue from federal loans, grants, and out-of-pocket payments from students, many cosmetology schools receive revenue generated by students’ unpaid work providing salon services such as haircuts, manicures, and facials, to paying customers.  Students may also be required to perform cleaning or administrative duties, and to sell products to customers.  Not only do schools profit from revenues generated from their students’ unpaid labor, but schools also simultaneously receive tuition payments from students for the hours spent providing the labor. Meanwhile, students are taking on debt to pay their schools for the opportunity to perform this unpaid labor. 
+
+In some states, including New York, New Jersey, and California, cosmetology students have sued their schools seeking to enforce a right to payment for at least some types of labor provided while enrolled in cosmetology programs.  However, courts have generally held that cosmetology students are not entitled to employment protections for labor provided as part of cosmetology training, even when that labor involves tasks that are not directly related to cosmetology skills, such as cleaning or administrative tasks.  
+
+## A new federal rule would prevent students and taxpayers from investing in low-value programs
+
+The gainful employment rule was originally issued by the Obama administration in 2014, but was rescinded by the Trump administration in 2019.  The rule applied to programs offered by for-profit colleges and to non-degree career-training programs offered by nonprofit and public colleges.  The rule conditioned programs’ eligibility for federal student financial aid on their meeting a debt-to-earnings benchmark for their graduates.  The rule was designed to encourage schools to improve quality and decrease program cost to ensure that students and taxpayers do not invest in programs that leave students unable to repay student loans.  
+
+The Department of Education has announced that it plans to reinstate the rule and will issue the rule for comment in April 2023. The department has signaled that the new version will, like the earlier version, include a debt-to-earnings metric.  The rule is also expected to include an earnings threshold that will limit eligibility for federal student financial aid to programs that demonstrate that their typical program graduates earn more than the median worker aged 25 to 34 in their state who has only a high school diploma.  
+
+Including both a debt-to-earnings threshold and an earnings threshold in the new rule will protect students and taxpayers from investing in programs that leave students unable to pay back their loans, or earning near-poverty-level wages. Many low-value programs pass the debt-to-earnings metric because of low borrowing rates among students, but fail the earnings metric because of graduates’ inadequate earnings. Including both metrics will capture low-value programs that fail either of these tests and protect students and taxpayers from investing in programs that provide little or no benefit. 
+
+Students are in serious need of protection: nearly all cosmetology programs that are subject to the rule leave graduates with near-poverty-level wages and would fail the proposed earnings threshold according to the most recent data.  In fact, cosmetology programs comprise 42 percent of all programs that fail the earnings threshold, even though cosmetology programs make up only 16 percent of all programs subject to the rule.  
+
+```{r stat8.5, include=TRUE, echo=FALSE, warning=FALSE}
+
+#######################################################################
+### Here we use the GEP.ET dataframe from a previous chunk. We      ###
+### first make a subset of ET failures and derive the share that    ###
+### are cosmetology. Then we do the same for all ET programs.       ###
+#######################################################################
+
+GEP.ET$Cosmetology <- ifelse(GEP.ET$cipcode==1204, 1, 0) 
+
+GEP.ET.fails <- GEP.ET %>% filter(pfET=="Fail - based on GE Data")
+ET.fail.counts <- aggregate(data=GEP.ET.fails, count ~ Cosmetology, FUN=sum)
+share.of.ET.fails.that.are.cosmetology <- ET.fail.counts$count[ET.fail.counts$Cosmetology==1] / sum(ET.fail.counts$count)
+paste("The share of ET fails that are cosmetology is ", percent(share.of.ET.fails.that.are.cosmetology, 1), ".", sep="")
+
+GEP.ET.all <- GEP.ET
+ET.counts <- aggregate(data=GEP.ET, count ~ Cosmetology, FUN=sum)
+share.of.ET.programs.that.are.cosmetology <- ET.counts$count[ET.counts$Cosmetology==1] / sum(ET.counts$count)
+paste("The share of ET programs that are cosmetology is ", percent(share.of.ET.programs.that.are.cosmetology, 1), ".", sep="")
+
+```
+
+As shown in Figure 1, nearly all cosmetology programs with sufficient data for assessment fail the earnings threshold test, and many fail by a large margin. 
+
+```{r figure1, include=TRUE, echo=FALSE, warning=FALSE}
+
+#######################################################################
+### This uses the dataset of cosmetology GE programs subject to ET. ###
+### We start by modifying how ET passes and failures are indicated  ###
+### (purely for aesthetics). Then we make a scatterplot that maps   ###
+### program earnings to the relevant state earnings threshold.      ###
+#######################################################################
+
+GEP.cos.ET$`Pass/Fail` <- ifelse(GEP.cos.ET$pfET=="Fail - based on GE Data", "Fail", "Pass")
+fig1 <- ggplot(data=GEP.cos.ET, mapping=aes(x=state_mdincearn_lf, y=earn_ne_mdn_3yr)) + geom_point(aes(shape=`Pass/Fail`), alpha=0.6, size=3) 
+
+#######################################################################
+### Now we add a line indicating the threshold programs must cross  ###
+### to pass the test.                                               ###
+#######################################################################
+
+fig1 <- fig1 + geom_abline(slope=1, intercept=0, color="red", linetype="dashed") 
+
+#######################################################################
+### Finally we perform some formatting and print the figure.        ###
+#######################################################################
+
+fig1 <- fig1 + scale_y_continuous(labels=scales::dollar_format()) + labs(y="Median earnings of graduates after 3 years", caption="Programs located under the red line fail the earnings threshold test") + scale_shape_manual(values = c(4, 1)) + scale_x_continuous(name = str_wrap("Median earnings for a H.S. graduate (age 25-34) in the state where the institution is located, who were in the labor force or had positive earnings", width = 80), labels=scales::dollar_format())
+
+fig1
+```
+
+
+```{r stat9, include=TRUE, echo=FALSE, warning=FALSE}
+
+#######################################################################
+### Here we simply divide the number of cosmetology programs that   ###
+### fail the earnings threshold test by the total number of         ###
+### cosmetology programs subject to the test.                       ###
+#######################################################################
+
+et.fail.percent <- sum(GEP.cos.ET$failsET) / sum(GEP.cos.ET$count)
+paste("The share of cosmetology programs that fail the earnings threshold test is ", percent(et.fail.percent, accuracy=0.1), ".", sep="")
+```
+
+Of the failing cosmetology programs, 89 percent are offered by for-profit schools, while for-profit schools comprise 70 percent of programs subject to the rule. 
+
+```{r stat11, include=TRUE, echo=FALSE, warning=FALSE}
+
+#######################################################################
+### First we aggregate and derive the totals we need.               ###
+#######################################################################
+
+agg6 <- aggregate(data=GEP.ET, count ~ failsET + cipcode + control, FUN=sum)
+
+ET.fail.cosmos.FP <- sum(agg6$count[(agg6$cipcode==1204) & (agg6$control=="Private, for-profit") & (agg6$failsET==1)])
+ET.fail.cosmos <- sum(agg6$count[(agg6$cipcode==1204) & (agg6$failsET==1)])
+
+ET.all.FP <- sum(agg6$count[agg6$control=="Private, for-profit"])
+ET.all <- sum(agg6$count)
+
+#######################################################################
+### Here we divide the total number of ET-failing cosmetology       ###
+### programs by the total number of ET-failing programs.            ###
+#######################################################################
+
+paste("For-profit colleges comprise ", percent(ET.fail.cosmos.FP / ET.fail.cosmos), " of ET failures that are in cosmetology.", sep="")
+
+#######################################################################
+### Now we divide the total number of for-profit programs subject   ###
+### to ET by the total number of programs subject to ET.            ###
+#######################################################################
+
+paste("For-profit colleges comprise ", percent(ET.all.FP / ET.all), " of all programs subject to the ET test.", sep="")
+```
+
+Critics of the high school earnings metric have suggested that the metric is not an appropriate method for evaluating cosmetology program outcomes.  These arguments are considered below. 
+
+### Underreported Earnings Are Not a Primary Contributor to Programs’ Poor Outcomes
+
+ Cosmetology schools have argued that applying an earnings-based metric to cosmetology programs is unfair because cosmetologists receive a significant portion of their earnings as tipped income, and this income is underreported to tax authorities, which are the source of the data used to calculate earnings outcomes.  The 2014 gainful employment rule permitted schools with failing programs to appeal earnings rate determinations by submitting data from institutional surveys of schools’ graduates,  but the department has indicated that the new rule will not provide for such an appeals process. 
+ 
+In a recent joint report from George Washington University, Columbia University, and Student Defense, researchers extrapolate from IRS findings on underreported income to estimate that approximately 8 percent of cosmetologist’s income is not reported to tax authorities.  The report concludes that adjusting cosmetology programs’ earnings data to include the estimated unreported earnings would not substantially change the failure rates for cosmetology programs under the debt-to-earnings threshold of the 2014 gainful employment rule.  
+
+Using the most recent data, an 8 percent adjustment would result in a 22 percent failure rate for the cosmetology programs under the debt-to-earnings metric, compared to a 28 percent failure rate without any adjustment.
+
+```{r stat12, include=TRUE, echo=FALSE, warning=FALSE}
+
+#######################################################################
+### Here we make a branch of the dataset with cosmetology programs  ###
+### that are subject to the DTE test.                               ###
+#######################################################################
+
+GEP.cos.DTE.test <- GEP.cos.DTE
+
+#######################################################################
+### Next we inflate earnings by 8%.                                 ###
+#######################################################################
+
+GEP.cos.DTE.test$earn_ne_mdn_3yr <- GEP.cos.DTE.test$earn_ne_mdn_3yr * 1.08
+
+#######################################################################
+### Now we replicate the DTE test. It starts with a discretionary   ###
+### earnings rate: the percentage of a GE program’s annual loan     ###
+### payment [annual_loan_payment_plus] compared to the              ###
+### discretionary earnings of the students who completed the        ###
+### program [earn_ne_mdn_3yr - 18735].                              ###
+#######################################################################
+
+GEP.cos.DTE.test$disc.earnings.rate <- GEP.cos.DTE.test$annual_loan_payment_plus / (GEP.cos.DTE.test$earn_ne_mdn_3yr - 18735)
+
+#######################################################################
+### Next we create a variable for the annual earnings rate: the     ###
+### ratio of a GE program’s typical annual loan payment amount      ###
+### [annual_loan_payment_plus] compared to the typical annual       ###
+### earnings of the students who completed the program              ###
+### [earn_ne_mdn_3yr], expressed as a percentage.                   ###
+#######################################################################
+
+GEP.cos.DTE.test$annual.earnings.rate <- GEP.cos.DTE.test$annual_loan_payment_plus / GEP.cos.DTE.test$earn_ne_mdn_3yr
+
+#######################################################################
+### Now we assign failures to any program where (i) Its             ###
+### discretionary earnings rate is greater than 20 percent or the   ###
+### income for the denominator of the rate (median discretionary    ###
+### earnings) is negative or zero and the numerator (median debt    ###
+### payments) is positive; and (ii) Its annual earnings rate is     ###
+### greater than 8 percent or the denominator of the rate (median   ###
+### annual earnings) is zero and the numerator (median debt         ###
+### payments) is positive.                                          ###
+####################################################################### 
+
+GEP.cos.DTE.test$pfDTE.modified <- ifelse(((GEP.cos.DTE.test$disc.earnings.rate > 0.2
+                                           |
+                                           ((GEP.cos.DTE.test$earn_ne_mdn_3yr - 18735) <= 0
+                                            &
+                                            GEP.cos.DTE.test$annual_loan_payment_plus > 0
+                                           ))
+                                          &
+                                          (GEP.cos.DTE.test$annual.earnings.rate > 0.08
+                                            |
+                                            ((GEP.cos.DTE.test$earn_ne_mdn_3yr == 0)
+                                            &
+                                            (GEP.cos.DTE.test$annual_loan_payment_plus > 0)
+                                          ))), 
+                                          "Fail", "Pass")
+
+####################################################################### 
+### Now we simply count fails as a percentage of all programs.      ###
+####################################################################### 
+
+modified.DTE.fails <- sum(GEP.cos.DTE.test$count[GEP.cos.DTE.test$pfDTE.modified=="Fail"])
+modified.DTE.n <- sum(GEP.cos.DTE.test$count)
+
+paste("With an 8% earnings adjustment, ", percent(modified.DTE.fails / modified.DTE.n), " of programs fail DTE.", sep="")
+paste("The unmodified DTE fail rate, 28%, came from Table 1.")
+
+```
+
+Similarly, an adjustment for unreported earnings would not result in a substantial change in the failure rate under the earnings threshold. An 8 percent adjustment would result in a 95 percent failure rate for cosmetology programs under the earnings threshold, compared to a 98 percent failure rate without the adjustment. 
+
+```{r stat13, include=TRUE, echo=FALSE, warning=FALSE}
+
+####################################################################### 
+### Here we branch the dataset of cosmetology GE programs that are  ###
+### subject to the earnings threshold test.                         ###
+####################################################################### 
+
+GEP.cos.ET.test <- GEP.cos.ET
+
+####################################################################### 
+### Now we inflate earnings by 8%.                                  ###
+####################################################################### 
+
+GEP.cos.ET.test$earn_ne_mdn_3yr <- GEP.cos.ET.test$earn_ne_mdn_3yr * 1.08
+
+####################################################################### 
+### Next we recreate the pass/fail determination.                   ###
+####################################################################### 
+
+GEP.cos.ET.test$pfET.modified <- ifelse(GEP.cos.ET.test$earn_ne_mdn_3yr > GEP.cos.ET.test$state_mdincearn_lf, 
+                                        "Pass", "Fail")
+
+####################################################################### 
+### Finally we count fails as a percentage of programs.             ###
+####################################################################### 
+
+modified.ET.fails <- sum(GEP.cos.ET.test$count[GEP.cos.ET.test$pfET.modified=="Fail"])
+modified.ET.n <- sum(GEP.cos.ET.test$count) 
+
+paste("With an 8% earnings adjustment, ", percent(modified.ET.fails / modified.ET.n), " of programs fail ET.", sep="")
+
+####################################################################### 
+### Now we quickly derive the unadjusted passing share.             ###
+####################################################################### 
+
+fail.share.ET <- sum(GEP.cos.ET$count[GEP.cos.ET$pfET=="Fail - based on GE Data"]) / sum(GEP.cos.ET$count)
+paste("Without an adjustment, ", percent(fail.share.ET), " of cosmetology programs subject to the ET rule fail.")
+```
+
+While cosmetology schools may point to unreported income to explain why the earnings data show their graduates faring poorly, the reality is that these graduates earn too little for a reasonable adjustment to make a meaningful difference in these schools’ outcomes under the rule.
+
+### Part-time work schedules are not a root cause of cosmetology programs’ poor outcomes
+
+Critics of applying the debt-to-earnings and earnings thresholds to cosmetology programs have also suggested that earnings-based metrics are unfair to cosmetology programs because cosmetology students include many parents who seek to work part-time schedules. If cosmetology students do in fact work significantly fewer hours than the typical worker, that would depress cosmetology programs’ earnings outcomes. However, data from the American Community Survey show that cosmetologists typically work close to a full-time schedule: cosmetologists work an average of 34.9 hours per week, compared to a typical work week of 38.2 hours per week for other workers.  
+
+```{r stat14, include=TRUE, echo=FALSE, warning=FALSE}
+
+######################################################################
+### Here we take the ACS data reflecting 2019 and we create one    ###
+### dataframe for cosmetologists only and another for              ###
+### non-cosmetologist workers.                                     ###
+######################################################################
+
+pusa.19 <- fread("psam_pusa_2019.csv", header=TRUE, select=pumsVariables) %>% filter(ESR %in% c(1, 2, 3, 4, 5))
+pusb.19 <- fread("psam_pusb_2019.csv", header=TRUE, select=pumsVariables) %>% filter(ESR %in% c(1, 2, 3, 4, 5))
+
+######################################################################
+### We now bind the two data sets and remove prior files.          ###
+######################################################################
+
+pusm.19 <- rbind(pusa.19, pusb.19) 
+rm("pusa.19", "pusb.19")
+
+cosmetologyOCCPs <- c(
+  4500, # Barbers
+  4510, # Hairdressers, Hairstylists, And Cosmetologists
+  4521, # Manicurists And Pedicurists
+  4522, # Skincare Specialists
+  4525  # Other Personal Appearance Workers
+)
+pusm.cos <- pusm.19 %>% filter(OCCP %in% cosmetologyOCCPs)
+pusm.nocos <- pusm.19 %>% filter((OCCP %in% cosmetologyOCCPs)==FALSE)
+
+######################################################################
+### Now we derive the mean weekly hours worked, weighted by PWGTP. ###
+######################################################################
+
+pusm.cos$PWGTPshare <- pusm.cos$PWGTP / sum(pusm.cos$PWGTP, na.rm=TRUE)
+pusm.cos$weighted.earnings <- pusm.cos$PWGTPshare * pusm.cos$WKHP
+mean.cosmetologist.hours <- sum(pusm.cos$weighted.earnings, na.rm=TRUE)
+
+pusm.nocos$PWGTPshare <- pusm.nocos$PWGTP / sum(pusm.nocos$PWGTP, na.rm=TRUE)
+pusm.nocos$weighted.earnings <- pusm.nocos$PWGTPshare * pusm.nocos$WKHP
+mean.noncosmetologist.hours <- sum(pusm.nocos$weighted.earnings, na.rm=TRUE)
+
+paste("Cosmetologists work an average of ", round(mean.cosmetologist.hours, 1), " hours per week.")
+paste("All other workers work an average of ", round(mean.noncosmetologist.hours, 1), " hours per week.", sep="")
+```
+
+Even if a 9.5 percent adjustment were made to programs’ median income data to account for this 3.3-hour gap, 95 percent of cosmetology programs would still fail the high school earnings threshold test. 
+
+```{r stat15, include=TRUE, echo=FALSE, warning=FALSE}
+
+######################################################################
+### This is the same process as we had used for the previous       ###
+### earnings adjustment (see the "stat14" chunk).                  ###
+######################################################################
+
+GEP.cos.ET.test2 <- GEP.cos.ET
+GEP.cos.ET.test2$earn_ne_mdn_3yr <- GEP.cos.ET.test2$earn_ne_mdn_3yr * 1.095
+GEP.cos.ET.test2$pfET.modified <- ifelse(GEP.cos.ET.test2$earn_ne_mdn_3yr > GEP.cos.ET.test2$state_mdincearn_lf, 
+                                        "Pass", "Fail")
+modified.ET.2.fails <- sum(GEP.cos.ET.test2$count[GEP.cos.ET.test2$pfET.modified=="Fail"])
+modified.ET.2.n <- sum(GEP.cos.ET.test2$count) 
+paste("With a 9.5% earnings adjustment, ", percent(modified.ET.fails / modified.ET.n), " of programs fail ET.", sep="")
+```
+
+This suggests that part-time work schedules are not the root cause of the poor outcomes of cosmetology programs. 
+
+### Gender-based wage disparities are not the primary cause of cosmetology programs’ poor outcomes.
+
+Some have argued that the high proportion of women in cosmetology programs and gender-based wage disparities could also contribute to the low earnings outcomes of cosmetology programs. More than 90 percent of cosmetology students are women. 
+
+```{r stat16, include=TRUE, echo=FALSE, warning=FALSE}
+paste("This was calculated earlier in the paper.")
+```
+
+In contrast, men are disproportionately represented in the general workforce - men make up around 61 percent of working 25 – 34 year olds with only a high school diploma. In addition, there is a significant earnings gap between men and women in the U.S. workforce. For example, for workers with a high school degree, the wage gap between men and women is about $8,800, or 43 percent of the average earnings for women.  While some scholars have raised concerns that gender-based wage disparities may be correlated with program failures,  others have found that programs’ gender composition has only a small effect on earnings threshold pass rates after accounting for other factors such as whether the program is offered by a for-profit school.  
+
+Recently-released data suggest that cosmetology programs’ poor track record of setting students up for success cannot be ascribed to gender. The gender-based wage disparity within the cosmetology field is small: one year after completing their programs, female graduates of cosmetology programs earn just 1 percent less than male graduates of the same programs.  
+
+```{r stat16.5, include=TRUE, echo=FALSE, warning=FALSE}
+
+######################################################################
+### First we load in a new set of variables from the program-level ###
+### College Scorecard dataset.                                     ###
+######################################################################
+
+CSP3 <- fread("Most-Recent-Cohorts-Field-of-Study.csv", header=TRUE, select=c(
+  "UNITID",                   # Unit ID for institution
+  "OPEID6",                   # 6-digit OPE ID for institution
+  "CONTROL",                  # Control of institution
+  "CIPCODE",                  # Classification of Instructional Programs (CIP) code for the field of study
+  "CREDLEV",                  # Level of credential
+  "EARN_MALE_WNE_MDN_1YR",    # Median earnings of male graduates working and not enrolled 1 year after completing highest credential
+  "EARN_NOMALE_WNE_MDN_1YR",  # Median earnings of non-male graduates working and not enrolled 1 year after completing highest credential
+  "EARN_COUNT_MALE_WNE_1YR",  # Number of male graduates working and not enrolled 1 year after completing highest credential
+  "EARN_COUNT_NOMALE_WNE_1YR" # Number of non-male graduates working and not enrolled 1 year after completing highest credential
+)) 
+
+######################################################################
+### Next we filter for the programs where there is data on both    ###
+### men's and women's earnings. (The dataset uses "male" and "non- ###
+### male," which for simplicity we refer to here as female.)       ###
+######################################################################
+
+CSP3 <- CSP3 %>% filter((EARN_MALE_WNE_MDN_1YR %in% c("NULL", "PrivacySuppressed"))==FALSE) %>% filter((EARN_NOMALE_WNE_MDN_1YR %in% c("NULL", "PrivacySuppressed"))==FALSE) 
+
+######################################################################
+### Now we make sure the earnings data are in numerics.            ###
+######################################################################
+
+CSP3$EARN_COUNT_MALE_WNE_1YR <- as.numeric(CSP3$EARN_COUNT_MALE_WNE_1YR) 
+CSP3$EARN_COUNT_NOMALE_WNE_1YR <- as.numeric(CSP3$EARN_COUNT_NOMALE_WNE_1YR) 
+CSP3$EARN_MALE_WNE_MDN_1YR <- as.numeric(CSP3$EARN_MALE_WNE_MDN_1YR)
+CSP3$EARN_NOMALE_WNE_MDN_1YR <- as.numeric(CSP3$EARN_NOMALE_WNE_MDN_1YR)
+
+######################################################################
+### We're interested in four fields of study here. We make a new   ###
+### dataframe for each, filtered for only the programs in that     ###
+### field.                                                         ###
+######################################################################
+
+CSP3.cos <- CSP3 %>% filter(CIPCODE=="1204")
+CSP3.edu <- CSP3 %>% filter(CIPCODE=="1301")
+CSP3.den <- CSP3 %>% filter(CIPCODE=="5106")
+CSP3.nur <- CSP3 %>% filter(CIPCODE=="5138")
+CSP3.all <- CSP3
+
+######################################################################
+### Now, for both the male set of variables and the female set of  ###
+### variables, we find each program's share of the total students. ###
+######################################################################
+
+CSP3.cos$maleshare <- CSP3.cos$EARN_COUNT_MALE_WNE_1YR / sum(CSP3.cos$EARN_COUNT_MALE_WNE_1YR)
+CSP3.edu$maleshare <- CSP3.edu$EARN_COUNT_MALE_WNE_1YR / sum(CSP3.edu$EARN_COUNT_MALE_WNE_1YR)
+CSP3.den$maleshare <- CSP3.den$EARN_COUNT_MALE_WNE_1YR / sum(CSP3.den$EARN_COUNT_MALE_WNE_1YR)
+CSP3.nur$maleshare <- CSP3.nur$EARN_COUNT_MALE_WNE_1YR / sum(CSP3.nur$EARN_COUNT_MALE_WNE_1YR)
+CSP3.all$maleshare <- CSP3.all$EARN_COUNT_MALE_WNE_1YR / sum(CSP3.all$EARN_COUNT_MALE_WNE_1YR)
+
+CSP3.cos$femaleshare <- CSP3.cos$EARN_COUNT_NOMALE_WNE_1YR / sum(CSP3.cos$EARN_COUNT_NOMALE_WNE_1YR)
+CSP3.edu$femaleshare <- CSP3.edu$EARN_COUNT_NOMALE_WNE_1YR / sum(CSP3.edu$EARN_COUNT_NOMALE_WNE_1YR)
+CSP3.den$femaleshare <- CSP3.den$EARN_COUNT_NOMALE_WNE_1YR / sum(CSP3.den$EARN_COUNT_NOMALE_WNE_1YR)
+CSP3.nur$femaleshare <- CSP3.nur$EARN_COUNT_NOMALE_WNE_1YR / sum(CSP3.nur$EARN_COUNT_NOMALE_WNE_1YR)
+CSP3.all$femaleshare <- CSP3.all$EARN_COUNT_NOMALE_WNE_1YR / sum(CSP3.all$EARN_COUNT_NOMALE_WNE_1YR)
+
+######################################################################
+### Then we multiply each program's median earnings values by the  ###
+### corresponding share of the universe of students.               ###
+######################################################################
+
+CSP3.cos$weightedmedian.male <- CSP3.cos$maleshare * CSP3.cos$EARN_MALE_WNE_MDN_1YR
+CSP3.edu$weightedmedian.male <- CSP3.edu$maleshare * CSP3.edu$EARN_MALE_WNE_MDN_1YR
+CSP3.den$weightedmedian.male <- CSP3.den$maleshare * CSP3.den$EARN_MALE_WNE_MDN_1YR
+CSP3.nur$weightedmedian.male <- CSP3.nur$maleshare * CSP3.nur$EARN_MALE_WNE_MDN_1YR
+CSP3.all$weightedmedian.male <- CSP3.all$maleshare * CSP3.all$EARN_MALE_WNE_MDN_1YR
+
+CSP3.cos$weightedmedian.female <- CSP3.cos$femaleshare * CSP3.cos$EARN_NOMALE_WNE_MDN_1YR
+CSP3.edu$weightedmedian.female <- CSP3.edu$femaleshare * CSP3.edu$EARN_NOMALE_WNE_MDN_1YR
+CSP3.den$weightedmedian.female <- CSP3.den$femaleshare * CSP3.den$EARN_NOMALE_WNE_MDN_1YR
+CSP3.nur$weightedmedian.female <- CSP3.nur$femaleshare * CSP3.nur$EARN_NOMALE_WNE_MDN_1YR
+CSP3.all$weightedmedian.female <- CSP3.all$femaleshare * CSP3.all$EARN_NOMALE_WNE_MDN_1YR
+
+######################################################################
+### Lastly we generate weighted median values, put them in a       ###
+### new dataframe, and create a barchart.                          ###
+######################################################################
+
+tblMW <- data.frame("CIP" = rep(c("Cosmetology",
+                                  "Education (general)",
+                                  "Dental assistant",
+                                  "Nursing", 
+                                  "All fields"), 2), 
+                     "Gender" = c(rep("Men", 5), rep("Women", 5)), 
+                     "Earnings" = c(sum(CSP3.cos$weightedmedian.male), 
+                                    sum(CSP3.edu$weightedmedian.male), 
+                                    sum(CSP3.den$weightedmedian.male), 
+                                    sum(CSP3.nur$weightedmedian.male), 
+                                    sum(CSP3.all$weightedmedian.male),
+                                    sum(CSP3.cos$weightedmedian.female), 
+                                    sum(CSP3.edu$weightedmedian.female), 
+                                    sum(CSP3.den$weightedmedian.female), 
+                                    sum(CSP3.nur$weightedmedian.female), 
+                                    sum(CSP3.all$weightedmedian.female)))
+tblMW$CIP <- factor(tblMW$CIP, levels=c("Cosmetology", "Dental assistant", "Education (general)", "Nursing", "All fields"))
+
+#######################################################################
+### Now we simply find the ratio of cosmetology programs' weighted  ### 
+### median earnings for women versus their weighted median earnings ###
+### for men.                                                        ###
+#######################################################################
+
+ratio1 <- (sum(CSP3.cos$weightedmedian.female) / sum(CSP3.cos$weightedmedian.male)) - 1
+paste("Women earn ", percent(abs(ratio1)), " less than male graduates of their cosmetology programs.")
+```
+
+In fact, cosmetology programs are atypical in that there is very little gender inequity among graduates compared to other fields—when all postsecondary programs are included, women graduates earn 16 percent less than men who completed the same program. 
+
+```{r stat17, include=TRUE, echo=FALSE, warning=FALSE}
+ratio2 <- (sum(CSP3.all$weightedmedian.female) / sum(CSP3.all$weightedmedian.male)) - 1
+paste("When all fields are included, women earn ", percent(abs(ratio2)), " less than male graduates of their programs.")
+```
+
+Figure 2 compares the earnings of men and women cosmetology graduates to those of workers in other fields where women comprise an outsized share of workers: dental assistants, educators, and nurses, alongside all fields as a reference point. 
+
+```{r figure2, include=TRUE, echo=FALSE, warning=FALSE}
+
+#######################################################################
+### This is a simple barchart using the dataframe created above.    ###
+#######################################################################
+
+ggplot(data=tblMW, mapping=aes(x=CIP, y=Earnings, color=Gender)) + geom_bar(stat="identity", position = position_dodge2(padding=0.1), fill="white") + labs(x="Field of study", y="Average earnings of workers 1 year after program completion") + scale_y_continuous(labels=scales::dollar_format()) + scale_color_manual(values=c("blue", "red"))
+```
+
+We observe that cosmetology’s earnings are the same for men and women alike, around $17,000. By contrast, male nurses and male educators earn roughly 11 percent more, on average, than women who graduate from the same program. Evidently, the poverty of cosmetologists’ earnings outlooks (regardless of gender) trumps the labor market structures that bolster men’s compensation while not doing the same for women.
+
+```{r stat17.5, include=TRUE, echo=FALSE, warning=FALSE}
+
+#######################################################################
+### These ratios are calculated similarly as above.                 ###
+#######################################################################
+
+ratio3 <- (sum(CSP3.nur$weightedmedian.male) / sum(CSP3.nur$weightedmedian.female)) - 1
+paste("Men earn ", percent(abs(ratio3), 0.1), " more than female graduates of their nursing programs.")
+
+ratio4 <- (sum(CSP3.edu$weightedmedian.male) / sum(CSP3.edu$weightedmedian.female)) - 1
+paste("Men earn ", percent(abs(ratio4), 0.1), " more than female graduates of their education programs.")
+```
+
+Accordingly, even if cosmetology programs had the same gender composition as the general population, it is unlikely that programs’ overall earnings would be significantly higher. Because male graduates of cosmetology programs see low earnings just like female graduates, the quality of education in these programs and the dearth of high-paying cosmetology jobs likely plays a greater role in cosmetology program’s gainful employment failures than the downstream effects on income from programs’ gender compositions. 
+
+### The proposed rule appropriately factors in the earnings of all program graduates, even those with no income.
+
+Critics of the earnings threshold have also suggested that the earnings threshold, as described by the department during the winter 2022 negotiated rulemaking process, would unfairly compare earnings from all program graduates (including those with zero income) to workers with only a high school diploma (excluding those with zero incomes).  However, including non-working program graduates while excluding non-working high school graduates is justified for one simple reason: high school attendance is compulsory while cosmetology school is a deliberate career choice. Students who invest time and money and go into debt to pursue a career-focused postsecondary degree do so in order to pursue employment in that field. Graduates of such programs who are not working are likely to be unsuccessfully seeking employment, rather than choosing to remain outside of the labor force. Accordingly, it is appropriate to compare all program graduates to workers with only a high school diploma. 
+	
+## Will cosmetology programs meet the new rule’s debt-to-earnings benchmark?
+
+The gainful employment rule’s debt-to-earnings threshold is meant to protect students and taxpayers from investing in programs that lead to insurmountable student debt. The debt-to-earnings threshold also drives improvements in programs by creating a strong incentive for schools to reduce tuition costs, decrease students’ need to borrow, and boost program quality. A larger percentage of cosmetology programs will meet the debt-to-earnings threshold than meet the earnings threshold: 72 percent of cosmetology programs subject to the rule already pass the debt-to-earnings threshold without any adjustments.  
+
+```{r stat18, include=TRUE, echo=FALSE, warning=FALSE}
+
+#######################################################################
+### This is a simple percentage calculation.                        ###
+#######################################################################
+
+passing.share <- sum(GEP.cos.DTE$count[GEP.cos.DTE$pfDTE=="Pass - based on GE data"]) / sum(GEP.cos.DTE$count)
+paste(percent(passing.share), " of cosmetology programs subject to the DTE rule pass.")
+```
+
+(See Figure 3.) 
+
+```{r figure3, include=TRUE, echo=FALSE, warning=FALSE}
+
+#######################################################################
+### To graph programs'  outcomes for the DTE test, we first         ###
+### calculate each program's discretionary earnings rate and annual ###
+### earnings rate.                                                  ###
+#######################################################################
+
+GEP.cos.DTE$discretionaryEarningsRate <- GEP.cos.DTE$annual_loan_payment_plus / (GEP.cos.DTE$earn_ne_mdn_3yr - 18735)
+GEP.cos.DTE$annualEarningsRate <- GEP.cos.DTE$annual_loan_payment_plus / GEP.cos.DTE$earn_ne_mdn_3yr
+
+#######################################################################
+### Here I modify the pass/fail indicator for aesthetic purposes.   ###
+#######################################################################
+
+GEP.cos.DTE$`Pass/Fail` <- ifelse(GEP.cos.DTE$pfDTE=="Fail - based on GE Data", "Fail", "Pass")
+
+#######################################################################
+### For aesthetic purposes, we remove programs where the typical    ###
+### annnual loan payment is $0.                                     ###
+#######################################################################
+
+GEP.cos.DTE2 <- GEP.cos.DTE %>% filter(annual_loan_payment_plus != 0)
+
+#######################################################################
+### Now we plot median earnings and the annual loan payment.        ###
+#######################################################################
+
+fig3 <- ggplot(data=GEP.cos.DTE2, mapping=aes(x=annual_loan_payment_plus, y=earn_ne_mdn_3yr)) + geom_point(aes(shape=`Pass/Fail`), alpha=0.6, size=3) 
+
+#######################################################################
+### Next we add a line indicating the annual earnings threshold.    ###
+#######################################################################
+
+fig3 <- fig3 + geom_abline(slope=12.5, intercept=0, color="blue", linetype="dashed") 
+
+#######################################################################
+### Next we add a line indicating the discretionary earnings        ###
+### threshold.                                                      ###
+#######################################################################
+
+fig3 <- fig3 + geom_abline(slope=5, intercept= 18735, color="orange", linetype="dashed") 
+
+#######################################################################
+### Finally we perform some formatting.                             ###
+#######################################################################
+
+# fig3 <- fig3 + scale_y_continuous(lim=c(1, 1), labels=scales::dollar_format()) + scale_x_continuous(lim=c(1, 1), labels=scales::dollar_format()) + 
+  
+fig3 <- fig3 + labs(y="Median annual earnings 3 years after program completion", x="Annual loan payment", caption="Programs located below both the blue line and the orange line fail the debt-to-earnings test") + scale_shape_manual(values = c(4, 1))
+
+fig3
+```
+
+If the earnings rate is adjusted by adding 8 percent to address concerns about underreported income, then 78 percent of cosmetology programs pass the debt-to-earnings test.   
+
+```{r stat19, include=TRUE, echo=FALSE, warning=FALSE}
+paste("This was calculated earlier in the paper.")
+```
+
+Of programs that fail the debt-to-earnings test, virtually all (98 percent) are for-profit programs. 
+
+```{r stat20, include=TRUE, echo=FALSE, warning=FALSE}
+
+#######################################################################
+### After we isolate DTE fails, this is a simple percentage         ###
+### calculation.                                                    ###
+#######################################################################
+
+GEP.cos.DTE.fails <- GEP.cos.DTE %>% filter(pfDTE=="Fail - based on GE Data")
+FP.ratio <- sum(GEP.cos.DTE.fails$count[GEP.cos.DTE.fails$control=="Private, for-profit"]) / sum(GEP.cos.DTE.fails$count)
+paste("Of programs that fail the DTE test, ", percent(FP.ratio), " are at for-profits.")
+```
+
+Only one program passes the earnings test but fail the debt-to-earnings metric.
+
+```{r stat20.5, include=TRUE, echo=FALSE, warning=FALSE}
+
+#######################################################################
+### Here we subset the dataframe of cosmetology programs that are   ###
+### subject to both tests, filtering for the specified conditions.  ###
+#######################################################################
+
+pass.ET.fail.DTE <- GEP.cos %>% filter(failsDTE==1) %>% filter(failsET == 0)
+paste("The number of programs that pass ET but fail DTE is ", nrow(pass.ET.fail.DTE), ".", sep="")
+
+```
+
+A program fails the rule’s debt-to-earnings requirement if an exceedingly large share of students receiving financial aid have: 
+
+* high debt relative to their total earnings, called the “annual earnings rate”;
+
+* and high debt relative to their earnings after protecting a certain amount for basic living expenses, called the “discretionary earnings rate.” 
+
+The annual earnings rate test determines whether the standard payment on the student loans for a program graduate would be more than 8 percent of median income three years after program completion. The discretionary earnings rate test asks whether the standard payment on the student loans for a program graduate would be more than 20 percent of discretionary income, defined as earnings above 150 percent of the poverty line, currently $18,735. 
+
+Programs would have to fail both debt-to-earnings tests to fail the gainful employment rule. Most cosmetology programs pass the first debt-to-earnings test, which compares annual loan payment with median income. However, almost all cosmetology programs fail the second debt-to-earnings test: their annual loan payment is more than 20 percent of discretionary income. As stated previously, cosmetology program graduates average $16,600 in earnings three years after graduating, which is less than the $18,735 that the Department of Education estimates is needed for everyday expenses: in other words, the average cosmetology program graduate with student loan debt must choose between paying off their debt or paying for vital life expenses, as they likely do not have the money for both. 
+
+Even though only a small percentage of cosmetology programs pass the earnings threshold but fail the debt-to-earnings threshold, the debt-to-earnings threshold should still be retained. It is not enough for programs simply to raise earnings above high school graduates’ earnings—to be worthwhile, a program must also enable graduates to earn enough to pay back their student loans. Including the debt-to-earnings metric ensures that students are not taking on debt that they will be unable to repay and creates strong incentives for schools to decrease tuition. Both measures should be retained in the new rule. 
+
+## The new rule will lead to significant changes for the industry that will benefit students.
+
+With so many Title IV participating cosmetology programs leading to near-poverty-level wages, the proposed gainful employment rule will likely cause major changes in the cosmetology training industry. The rule will drive some Title IV schools to change their program offerings by expanding or adding programs in fields that lead to higher-paying jobs and phasing out programs that lead to inadequate earnings. In addition, some Title IV schools may choose to leave the Title IV program. With the proposed rule slated for release in spring 2023, and not expected to go into effect until 2024, Title IV schools have a long lead time to consider changes to program offerings, or to lay the groundwork for pivoting to operating outside of the Title IV program. Already, a significant proportion of cosmetology programs currently operate without participating in Title IV,  and these programs tend to be less expensive and may actually be a better deal for students. 
+	
+One study by Harvard University and George Washington University economists compared for-profit cosmetology programs that received Title IV funding with similar-length programs that did not participate in Title IV and found that the non-Title IV programs were significantly less expensive. The study found that, on average, the tuition for non-Title IV programs was $3,900 less than the tuition of Title IV participating programs.  Not only did the Title IV participating cosmetology schools charge higher tuition than the non-Title IV programs, but the price differential was roughly the same as the amount of federal aid dollars provided for each student, suggesting that participation in Title IV may have caused for-profit schools to inflate tuition above the cost of education.  The Title IV and non-Title IV programs had similar passage rates for state licensure exams.  
+
+A landscape where more cosmetology schools exit Title IV is not without challenges, however. If Title IV participating cosmetology training programs respond to the gainful employment rule by exiting the Title IV program, some students will be dissuaded from enrolling. For those who do enroll, the non-Title IV programs may be less expensive, but still risky. Without access to federal student loans and grants, cosmetology students may turn to private student loans or other forms of consumer debt. Private student loans and other forms of consumer debt generally have higher interest rates and offer fewer protections than federal student loans.  
+
+Some Title IV participating cosmetology schools may seek alternate sources of revenue, such as federal Workforce Innovation and Opportunity Act (WIOA) funding, to replace Title IV. Several states, including California, Maryland, and Wyoming, currently offer students the opportunity to pursue free or very-low-cost cosmetology training through small-scale apprenticeship programs funded through WIOA.  WIOA funding, which is targeted to un- and underemployed workers looking to gain skills, may be better suited than Title IV to fund training for low-paying cosmetology jobs.
+
+Increasing financial investment in WIOA would help states expand the reach of such programs and improve evaluation procedures to ensure that the funds are invested in programs that provide a strong return on investment and recruit from traditionally underrepresented communities.  The federal government should increase investments in WIOA to expand access to the programs and ensure robust outcome and quality control standards. 
+
+## Recommendations 
+
+In order to protect students and taxpayers from investing in cosmetology programs that provide little or no benefit to the students they enroll, the U.S. Department of Education should move forward with a proposed gainful employment rule that includes both a debt-to-earnings threshold and an earnings threshold. 
+
+The U.S. Department of Education should also move forward with a rule that would limit Title IV eligibility by program length. The program length rule would compel states to decrease inflated minimum hour requirements, lowering costs and reducing student borrowing. 
+
+Finally, the U.S. Department of Education should consider limiting or prohibiting Title IV schools from profiting from students’ unpaid labor while collecting Title IV aid. 
+
+Congress should increase investment in WIOA’s workplace-based training programs to expand access to free or very low-cost workplace-based cosmetology training programs. Increased investment would enable states to expand access, employ robust quality control and outcome standards to ensure that funds are invested in programs that provide a strong return on investment, and increase recruitment from traditionally underrepresented communities. This investment would also allow training programs like cosmetology apprenticeships to pick up the slack that may be left behind if cosmetology programs exit the Title IV program	
+	
+States should also take steps to protect cosmetology students, including by reducing inflated minimum hour requirements for cosmetology licensure and enacting legislation that extends state worker protections to students who provide services to paying customers as part of their training. 
+
+Together, these changes would require the cosmetology industry to take a serious look in the mirror about the education that beauty schools provide. While the federal government is right to discharge the loans of students who were sold a shoddy education by Marinello Beauty School, imposing these safeguards will save future students from investing time and money in programs that are not worth the investment.
