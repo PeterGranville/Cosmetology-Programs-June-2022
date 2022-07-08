@@ -13,7 +13,7 @@ library(stringr)
 library(data.table)
 
 #####################################################################
-### This document reproduces The Century Foundation's June 2022   ###
+### This document reproduces The Century Foundation's July 2022   ###
 ### report on cosmetology programs, embedding the code used for   ###
 ### all original analysis into the text of the report. It is      ###
 ### intended for any user with proficiency in R to determine how  ###
@@ -38,14 +38,14 @@ library(data.table)
 ### The next source is the College Scorecard. We use the full,    ###
 ### most recent (as of June 2022) program-level and               ###
 ### institution-level data sets, which can be downloaded here:    ###
-### https://collegescorecard.ed.gov/data/. 
+### https://collegescorecard.ed.gov/data/.                        ###
 #####################################################################
 
 #####################################################################
 ### The third source is the American Community Survey Public Use  ###
 ### Microdata Sample. We use the 1-year PUMS sample reflecting    ###
-### calendar year 2019. The data files can be downloaded from     ###
-### this site in the "csv_pus.zip" file:                          ###
+### calendar year 2018 and 2019. The data files can be downloaded ###
+### from this site in the "csv_pus.zip" file:                     ###
 ### https://www2.census.gov/programs-surveys/acs/data/pums/2019/1-Year/
 #####################################################################
 
@@ -78,7 +78,7 @@ c2019 <- fread("c2019_a_rv.csv", header=TRUE, select=c(
 
 #######################################################################
 ### Now we count the number of programs that are in cosmetology.    ###
-### First we define which CIP codes are in cosmetology. 
+### First we define which CIP codes are in cosmetology.             ###
 #######################################################################
 
 cosmetologyCIPs <- c(
@@ -119,8 +119,7 @@ Unfortunately, the case of Marinello Beauty School is not an isolated incident. 
 ```{r stat1, include=TRUE, echo=FALSE, warning=FALSE}
 #####################################################################
 ### First we load the data from the institutional characteristics ###
-### survey in IPEDS. The variables we use refer to the            ###
-### institution's largest program.                                ###
+### survey in IPEDS.                                              ###
 #####################################################################
 
 ic2020 <- read.csv("ic2020_py.csv", header=TRUE, row.names = NULL) %>% select(
@@ -139,6 +138,11 @@ ic2020$MTHCMP3 <- as.numeric(ic2020$MTHCMP3)
 #####################################################################
 ### Now we calculate the average length of time needed for a      ###
 ### full-time student to complete a cosmetology program.          ###
+#####################################################################
+
+#####################################################################
+### First we create three dataframes where the rows correspond to ###
+### a program and merge.                                          ###
 #####################################################################
 
 ic1 <- ic2020 %>% filter(CIPCODE1 %in% cosmetologyCIPs)
@@ -204,7 +208,7 @@ paste("Average earnings among cosmetology program graduates is ", dollar(weighte
 ### This American Community Survey dataset reflects calendar year  ###
 ### 2019. We load in the weight variable and selected employment   ###
 ### and education variables. We filter for those who were in the   ###
-### workforce at the time of interview.                            ###
+### workforce at the time of interview (ESR between 1 and 5).      ###
 ######################################################################
 
 ######################################################################
@@ -247,14 +251,14 @@ pusm.HSG <- pusm %>% filter(SCHL %in% c(
 
 ######################################################################
 ### Now we reduce the weights' size to make calculations faster.   ###
-### This does not have a great effect on the median income value.  ###
+### This does not have a strong effect on the median income value. ###
 ######################################################################
 
 pusm.HSG$PWGTP.modified <- pusm.HSG$PWGTP / 10
 
 ######################################################################
 ### We way we calculate median earnings is as follows: we put into ###
-### a dataframe each subject's income, repeated for a number of    ###
+### a dataframe each subject's wages, repeated for a number of     ###
 ### times that corresponds to the subject's population weight. We  ###
 ### then derive the median from that list.                         ###
 ######################################################################
@@ -280,10 +284,10 @@ paste("The average earnings of those with only a high school diploma (aged 25-34
 ```{r stat3, include=TRUE, echo=FALSE, warning=FALSE}
 
 #####################################################################
-### Similarly as in the estimate of average earnings by program,  ###
-### we take the average debt values by program and weight them by ###
-### the program's share of cosmetology program graduates in the   ###
-### cohort.                                                       ###
+### Similarly as in the estimate of average earnings for          ###
+### cosmetologists, we take the average debt values by program    ###
+### and weight them by the program's share of cosmetology program ###
+### graduates in the cohort.                                      ###
 #####################################################################
 
 CSP2 <- fread("Most-Recent-Cohorts-Field-of-Study.csv", header=TRUE, select=c(
@@ -326,7 +330,7 @@ The number of cosmetology students at financial risk after attending these schoo
 
 effy2019 <- fread("effy2019_rv.csv", header=TRUE, select=c(
   "UNITID",   # Unique identification number of the institution
-  "EFFYLEV", # Level and degree/certificate-seeking status of student
+  "EFFYLEV",  # Level and degree/certificate-seeking status of student
   "EFYTOTLT"  # Grand total
 )) %>% filter(EFFYLEV==1) # All students total
 
@@ -395,13 +399,13 @@ Cosmetology schools received more than $1 billion in federal loans and grants in
 #######################################################################
 
 sfa1920 <- fread("sfa1920.csv", header=TRUE, select=c(
-  "UNITID", 
-  "UFLOANT", 
-  "UPGRNTT"
+  "UNITID",  # Unique identification number of the institution
+  "UFLOANT", # Total amount of federal student loans awarded to undergraduate students
+  "UPGRNTT"  # Total amount of Pell grant aid awarded to undergraduate students
 ))
 hd2020 <- fread("hd2020.csv", header=TRUE, select=c(
-  "UNITID", 
-  "CONTROL"
+  "UNITID",  # Unique identification number of the institution
+  "CONTROL"  # Control of institution 
 ))
 total.aid <- sum(sfa1920$UFLOANT[sfa1920$UNITID %in% cosmetologySchools], na.rm=TRUE) + sum(sfa1920$UPGRNTT[sfa1920$UNITID %in% cosmetologySchools], na.rm=TRUE)
 
@@ -477,10 +481,11 @@ Most cosmetology students also tend to be low-income when they enroll: 54 percen
 ########################################################################
 
 sfa1 <- fread("sfa1920.csv", header=TRUE, select=c(
-  "UNITID", 
-  "UPGRNTN", # Number of undergraduate students awarded Pell grants
+  "UNITID",    # Unique identification number of institution 
+  "UPGRNTN",   # Number of undergraduate students awarded Pell grants
   "SCUGRAD"    # Total number of undergraduates - financial aid cohort
 )) %>% filter(UNITID %in% cosmetologySchools)
+
 sfa1$UPGRNTN <- as.numeric(sfa1$UPGRNTN)
 sfa1$SCUGRAD <- as.numeric(sfa1$SCUGRAD)
 pell.at.cosmetology.schools <- sum(sfa1$UPGRNTN, na.rm=TRUE) / sum(sfa1$SCUGRAD, na.rm=TRUE)
